@@ -9,7 +9,7 @@ Data is not available due to private issues
 
 **FMfunctions.R**: functions used in main.R
 
-## graphs
+## graph
 
 contains all graphs used in final reports and proposal
 
