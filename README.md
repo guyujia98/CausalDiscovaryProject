@@ -17,4 +17,3 @@ contains all graphs used in final reports and proposal
 
 **proposal.rmd**: codes for proposal
 
-**proposal.html**: proposal report
