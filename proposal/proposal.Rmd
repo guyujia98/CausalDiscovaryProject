@@ -1,0 +1,347 @@
+---
+title: "Untitled"
+author: "Yujia Gu"
+date: "2022/3/10"
+output: html_document
+---
+
+##Introduction
+
+###Background
+
+Population aging has been a worldwide topic in recent years. As reported by World Health Organization(WHO) in Oct. 2021, by 2030, 1 in 6 people in the world will be aged 60 years or over. At the same time, every person should have the opportunity to live a long and healthy life. Therefore, healthy aging becomes a vital problem in our society. As one of the opposites to health, diseases, especially non-communicable diseases(NCDs) such as heart disease, cancer and diabetes, contribute a lot to the loss of health and life. Many risk factors have been found that have a relationship with non-communicable disease, such as unhealthy diets, physical inactivity, exposure to tobacco smoke or the harmful use of alcohol. 
+
+###Our Aims
+
+1. Try to find causal relationships between risk factors and some specific noncommunicable diseases during the ageing process.
+
+2. Find some of the most correlated risk factors to the noncommunicable diseases during the ageing process.
+
+##Data Description
+
+###Data Source
+
+Data was collected by several hospitals using questionaires and fitness tests.
+
+###Data Preprocessing
+
+The following packages will be used in this project:
+```{r, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyverse)
+library(rlang)
+library(ggplot2)
+library(labelled)
+library(stringr)
+library(psych)
+library(reshape2)
+source("functions.R")
+```
+
+The dataset is equipped with two another files, which explain the questions and corresponding answers. We load all those files.
+
+```{r}
+BJdata <- readRDS("BJ_data.RDS")
+question <- readRDS("question.RDS")
+answer <- readRDS("answer.RDS")
+```
+
+A first view of the dataset:
+```{r}
+dim(BJdata)
+head(BJdata)
+head(question)
+answer%>%filter(startsWith(question_id,"A"))%>%head(9)
+```
+
+We pick several risk factors and all 18 diseases as the variables and do the preprocessing. At the same time, to analysis the aging pattern, we devide age from 25 to 89 into 13 groups, with range of 4 in each groups, such as 25-29,30-34.
+```{r}
+data <- data_preprocess(BJdata,question,answer)
+A <- cut_by_list(data,"Age",breaks = seq(25,85,by=5),lower = 25,upper = 90)
+data <- data %>% mutate(AgeFactor=A$Age) %>% drop_na(AgeFactor,Gender,NoAlcohol,NoSmoking)
+
+str(data)
+```
+Note:
+
+1. All those data are self-reported, which may have bias.
+
+2. We compress Alcohol and Smoking into 0-1 variables by 0 indicates drinking/smoking now.  
+
+```{r}
+question%>%filter(question_id=="B17" | question_id=="B18")
+answer%>%filter(question_id=="B17"| question_id=="B18")
+```
+
+##Explortary Data Analysis
+
+
+###Single Index Analysis
+
+First we show the proportion of each risk factors with respect to gender.
+
+```{r}
+ratio_bar_plot(data)
+```
+
+
+We draw line plots for each of the 0-1 risk factors, with the proportion of the factor in each age group and gender group.
+```{r}
+loc=c(3,4,5,6)
+ratio_line_plotTogether(data,"Gender",loc)
+```
+
+Also, we draw same line plots for the dieases.Only 6 of them will be shown, the rest are shown in the Appendix.
+
+```{r}
+loc=8:13
+ratio_line_plotTogether(data,"Gender",loc)
+```
+
+###Interaction Analysis
+
+####Ageing Trend
+We calculate the proportion of people who has healthy style of risk factors but has disease as well. 
+```{r}
+ratio_bar_plotInter(data,"高血压")
+ratio_bar_plotInter(data,"代谢紊乱（血糖、血脂、血尿酸水平升高）")
+ratio_bar_plotInter(data,"心脏病")
+```
+
+####Correlation Heatmap
+
+To have a more straightforward view, we calculate the correlation between the risk factors and diseases in different age groups. Also, we calculate separately with gender as well. We use tetrachoric correlation to derive the correlation between two dichotomous variables. 
+
+```{r,warning=FALSE,message=FALSE}
+cor_heatmap_spec(data,"男","NoAlcohol")
+cor_heatmap_spec(data,"女","NoAlcohol")
+cor_heatmap_spec(data,"男","Exercise")
+cor_heatmap_spec(data,"男","RegLife")
+```
+
+Note:
+
+1. The correlation heatmaps imply different relationship between some risk factors and diseases through the ageing process. Male and female may show different patterns as well. 
+
+2. A causal relationship through the ageing process may be of great intest. The exercise heatmap may lead to a causal chain as not doing  exercise lead to disease and result in doing exercise afterwards.
+
+####Simple Causal Analysis
+
+A simple method to decide whether $X$ has influence on $Y$ is to compare the conditional distribution of $Y$ given different value of $X$(Pearl,2014). When $X$ and $Y$ are dichotomous variables, it can provide a clear view of the existence of causation under this structure. 
+
+```{r}
+ratio_line_plot(data,"NoAlcohol","高血压")
+ratio_line_plot(data,"高血压","NoAlcohol")
+ratio_line_plot(data,"RegLife","胃肠疾病")
+ratio_line_plot(data,"胃肠疾病","RegLife")
+```
+
+##Future Work
+
+1. Add more risk factors into consideration, such as dietary habits and metabolic indexes.
+
+2. Construct causal graphic models for risk factors and diseases.
+
+##Reference
+
+##Appendix
+
+###Function Codes
+
+```{r,eval=FALSE}
+#data preprocessing
+
+data_preprocess <- function(df,question,answer){
+  data <- df %>% select(A2,A4,B12,B13,B17_new,B18_new,K2.2,starts_with("D1."))%>% 
+    filter(A4>=25 & A4<=89) %>% 
+    mutate(RegLife=2-B12,Exercise=B13-1,NoAlcohol=ifelse(B17_new==1,1,0),NoSmoking=ifelse(B18_new==1,1,0))%>%
+    mutate(across(.cols = starts_with("D"),~ifelse(is.na(.x),0,1)))%>%
+    unlabelled()
+  nm_ls <- answer %>% filter(question_id == "A2") %>% mutate(value=as.numeric(value))
+  data <- data %>% left_join(nm_ls,by=c("A2"="value")) %>% mutate(A2=name) %>%select(-c(question_id,name))
+  
+  colD_nm <- question %>%filter(startsWith(question_id,"D1."))%>% pull(colname)
+  
+  data <- data %>% rename(Gender=A2,Age=A4,BMI=K2.2)
+  data <- data %>% rename_with(function(x){x<-colD_nm},.cols=starts_with("D"))
+  data <- data %>% select(c(Gender,Age,RegLife,Exercise,NoAlcohol,NoSmoking,BMI,all_of(colD_nm))) %>%
+    filter(!is.na(BMI) & !is.na(RegLife) & !is.na(Exercise)) %>%
+    filter(RegLife %in% c(0,1) & Exercise %in% c(0,1))
+  
+  return(data)
+}
+
+cut_by_list <- function(data, name, breaks, lower = -Inf, upper = Inf) {
+  if (name %in% colnames(data)) {
+    breaks <- breaks[breaks < upper & breaks >= lower]
+    if (length(breaks) > 0) {
+      breaks <- sort(breaks)
+      New <- purrr::reduce2(c(lower, breaks), c(breaks, upper), function(x, y, z) {
+        label <- paste(y, "-", z-1, sep = "")
+        x %>% mutate(Factor = ifelse((y <= value) & (value < z), label, Factor))
+      }, .init = data %>% transmute(Factor = NA, value = .data[[name]]))
+      data[[name]] <- (as.factor(pull(New, Factor)))
+      data
+    } else {
+      stop("No point left")
+    }
+  } else {
+    stop("No col find in dataset")
+  }
+}
+
+#-------EDA bar plot---------
+
+ratio_bar_plot<-function(data){
+  data_new <- data %>% group_by(Gender) %>% 
+    mutate(NoAlcohol=sum(NoAlcohol)/n(), NoSmoking=sum(NoSmoking)/n(),
+           RegLife=sum(RegLife)/n(), Exercise=sum(Exercise)/n())
+  
+  data_new <- data_new %>% select(all_of(c(1,3,4,5,6))) %>% 
+    pivot_longer(cols = all_of(c(2,3,4,5))) %>%unique
+  
+  ggplot(data_new,aes(x=name,y=value,group=Gender)) +
+    geom_bar(aes(fill = Gender),stat = 'identity',position = 'dodge') + 
+    xlab("Risk Factor") + 
+    ylab("ratio") +
+    theme_bw() +
+    theme(axis.ticks.length = unit(0.1, "cm")) +
+    theme(panel.grid = element_blank()) +
+    theme(panel.border = element_blank()) +
+    theme(axis.line = element_line(size = 0.5, colour = "black")) +
+    theme(
+      legend.title = element_text(size = 10, face = "plain", color = "black"),
+      legend.background = element_blank()
+      )
+}
+
+ratio_bar_plotInter <- function(data,Disease){
+  data_new <- data%>% mutate(across(.cols=all_of(3:6),~ifelse(!!sym(Disease)==1 & .x==1,1,0)))
+  data_new <- data_new%>%group_by(AgeFactor)%>%mutate(across(.cols=all_of(3:6),~sum(.x)/n())) %>%
+    select(AgeFactor,all_of(3:6))%>%
+    pivot_longer(cols = all_of(2:5))%>%
+    unique
+  
+  ggplot(data_new,aes(x=AgeFactor,y=value))+
+    geom_bar(fill="red",stat = 'identity',position="dodge")+
+    ylab("ratio")+
+    ggtitle(Disease)+
+    theme_bw() +
+    theme(axis.ticks.length = unit(0.1, "cm")) +
+    theme(axis.text.x = element_blank())+
+    theme(panel.grid = element_blank()) +
+    theme(panel.border = element_blank()) +
+    theme(axis.line = element_line(size = 0.5, colour = "black")) +
+    theme(
+      legend.title = element_text(size = 10, face = "plain", color = "black"),
+      legend.background = element_blank()
+    )+
+    facet_wrap(~name)
+    
+}
+#------EDA line plot-----
+ratio_line_plotTogether<- function(data,gn,loc,nrow=NULL,ncol=2){
+  data_new <- data %>% group_by(!!sym(gn),AgeFactor)%>% 
+    mutate(across(.cols=all_of(loc-1), ~sum(.x)/n()))
+  data_new <- data_new %>% select(!!sym(gn),AgeFactor,all_of(loc)) %>% 
+    pivot_longer(cols = !c(1,2)) %>%unique
+  
+  data_new %>% ggplot(aes(x=AgeFactor,y=value,group=!!sym(gn)))+
+    geom_point(aes(color=factor(!!sym(gn))))+
+    geom_line(aes(color=factor(!!sym(gn))))+
+    guides(color = guide_legend(title = gn)) + 
+    theme_bw() +
+    theme(axis.ticks.length = unit(0.1, "cm")) +
+    theme(axis.text.x = element_blank())+
+    theme(panel.grid = element_blank()) +
+    theme(panel.border = element_blank()) +
+    theme(axis.line = element_line(size = 0.5, colour = "black")) +
+    theme(
+      legend.title = element_text(size = 10, face = "plain", color = "black"),
+      legend.background = element_blank()
+    )+
+    facet_wrap(~name,nrow=nrow,ncol=ncol)
+  
+}
+
+
+ratio_line_plot<- function(data,gn,varibale_name){
+  data_new <- data %>% group_by(!!sym(gn),AgeFactor)%>% 
+    mutate(ratio=sum(!!sym(varibale_name))/n()) %>%
+    mutate(ste=sqrt(ratio*(1-ratio)/n()))
+  
+  data_new <- data_new %>% select(AgeFactor,!!sym(gn),ratio,ste)
+  
+  data_new%>%ggplot(aes(x=AgeFactor,y=ratio,group=!!sym(gn),color=factor(!!sym(gn)))) + 
+    geom_point(aes(color=factor(!!sym(gn))))+
+    geom_errorbar(
+                  aes(ymin = ratio - ste, 
+                      ymax = ratio + ste), width = 0.3, 
+                  size = 0.5) +
+    geom_line(aes(color=factor(!!sym(gn))))+
+    ggtitle(paste0("Proportion of ",varibale_name))+
+    guides(color = guide_legend(title = gn)) + 
+    theme_bw() +
+    theme(axis.ticks.length = unit(0.1, "cm")) +
+    theme(panel.grid = element_blank()) +
+    theme(panel.border = element_blank()) +
+    theme(axis.line = element_line(size = 0.5, colour = "black")) +
+    theme(
+      legend.title = element_text(size = 10, face = "plain", color = "black"),
+      legend.background = element_blank()
+    )
+}
+
+ratio_line_plotGender <- function(data,gn,varibale_name,Gd){
+  data_new <- data %>% group_by(Gender,!!sym(gn),AgeFactor)%>% mutate(ratio=sum(!!sym(varibale_name))/n())
+  data_newG <- data_new %>% filter(Gender==Gd)
+  data_newG%>%ggplot(aes(x=AgeFactor,y=ratio,group=!!sym(gn))) + 
+    geom_point(aes(color=!!sym(gn)))+
+    geom_line(aes(color=!!sym(gn))) + 
+    ggtitle(Gd)
+}
+#------heatmap plot-------
+cor_heatmap <- function(corMatrix){
+  cor_matrix <- data.frame(corMatrix)
+  
+  b <- cor_matrix %>% pivot_longer(everything(),names_to = "var1",
+                                   values_to = "value")
+  b <- b %>% mutate(var2=str_extract(rownames(b),"\\w+"))
+  
+  ggplot(b,aes(x=var2,y=var1,fill=abs(value)))+
+    geom_tile()+
+    geom_text(aes(label=round(value,2)),size=2.5)+
+    scale_fill_gradient(low="white",high="red")
+}
+
+cor_heatmap_spec<-function(data,Gd,variable){
+  Age_ls <- data %>% arrange(Age) %>% select(AgeFactor)%>%unique %>%
+    pull(AgeFactor) %>%as.character
+  Disease_ls <- colnames(data[8:25])
+  variable_matrix <- matrix(NA,18,13)
+  for(i in 1:length(Age_ls)){
+    corMatrix <- data%>% filter(Gender==Gd,AgeFactor==Age_ls[i])%>%
+      select(!!sym(variable),all_of(8:25)) %>%
+      mixedCor(d=1:19)
+    variable_matrix[,i]<- corMatrix[[1]][2:19,1]
+  }
+  
+  variable_matrix <- data.frame(variable_matrix)
+  colnames(variable_matrix)<- Age_ls
+  variable_matrix <- variable_matrix %>%mutate(var2=Disease_ls)
+  
+  b <- melt(variable_matrix,id="var2",variable.name = "var1",value.name = "value")
+  
+  ggplot(b,aes(x=var1,y=var2,fill=value))+
+    geom_tile()+
+    geom_text(aes(label=round(value,2)),size=2.5)+
+    scale_fill_gradient2(low="blue",mid="white",high="red",midpoint = 0)+
+    xlab("AgeFactor")+
+    ylab("Disease")+
+    ggtitle(paste0(Gd,variable," vs Disease"))+
+    theme_bw()+
+    theme(axis.text.x = element_blank())
+}
+
+```
+
